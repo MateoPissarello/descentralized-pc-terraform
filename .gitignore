@@ -1,0 +1,35 @@
+# Archivos de estado de Terraform
+*.tfstate
+*.tfstate.backup
+
+# Planes de ejecución
+*.tfplan
+
+# Archivos de configuración de variables sensibles
+*.tfvars
+*.tfvars.json
+
+# Directorios de Terraform
+.terraform/
+.terraform.lock.hcl
+
+# Archivos de salida de comandos
+crash.log
+
+# Archivos de lock generados por el proveedor
+.terraform.tfstate.lock.info
+
+# Archivos de logs o temporales
+*.log
+*.tmp
+
+# Evitar subir credenciales por error
+*.pem
+*.key
+*.crt
+*.env
+
+# Archivos generados por IDEs (opcional)
+.vscode/
+.idea/
+.DS_Store

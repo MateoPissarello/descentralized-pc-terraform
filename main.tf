@@ -13,18 +13,28 @@ provider "aws" {
   region = "us-east-1"
 }
 
-resource "aws_s3_bucket" "encryption_input_bucket" {
-  bucket        = "decentralized-encryption-input"
+resource "aws_s3_bucket" "input_bucket" {
+  bucket        = "decentralized-file-input"
   force_destroy = true
 }
 
-resource "aws_s3_bucket" "encryption_parts_bucket" {
-  bucket        = "decentralized-encryption-parts"
+resource "aws_s3_bucket" "parts_bucket" {
+  bucket        = "decentralized-parts"
   force_destroy = true
 }
 
-resource "aws_s3_bucket_public_access_block" "encryption_parts_block" {
-  bucket = aws_s3_bucket.encryption_parts_bucket.id
+resource "aws_s3_bucket" "encrypted_output_bucket" {
+  bucket        = "decentralized-encrypted-output"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket" "encrypted_parts_bucket" {
+  bucket        = "decentralized-encrypted-parts-output"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_public_access_block" "encrypted_parts_block" {
+  bucket = aws_s3_bucket.encrypted_parts_bucket.id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -32,8 +42,26 @@ resource "aws_s3_bucket_public_access_block" "encryption_parts_block" {
   restrict_public_buckets = true
 }
 
-resource "aws_s3_bucket_public_access_block" "encryption_input_block" {
-  bucket                  = aws_s3_bucket.encryption_input_bucket.id
+resource "aws_s3_bucket_public_access_block" "encrypted_output_block" {
+  bucket = aws_s3_bucket.encrypted_output_bucket.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_public_access_block" "parts_block" {
+  bucket = aws_s3_bucket.parts_bucket.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_public_access_block" "input_block" {
+  bucket                  = aws_s3_bucket.input_bucket.id
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
@@ -71,8 +99,8 @@ resource "aws_iam_policy" "lambda_s3_access" {
         ],
         Effect = "Allow",
         Resource = [
-          "${aws_s3_bucket.encryption_input_bucket.arn}/*",
-          "${aws_s3_bucket.encryption_parts_bucket.arn}/*"
+          "${aws_s3_bucket.input_bucket.arn}/*",
+          "${aws_s3_bucket.parts_bucket.arn}/*"
         ]
       }
     ]
@@ -94,14 +122,14 @@ resource "aws_lambda_function" "split_file_lambda" {
 
   environment {
     variables = {
-      OUTPUT_BUCKET = aws_s3_bucket.encryption_parts_bucket.bucket
+      OUTPUT_BUCKET = aws_s3_bucket.parts_bucket.bucket
       SQS_QUEUE_URL = aws_sqs_queue.encryption_queue.id
     }
   }
 }
 
 resource "aws_s3_bucket_notification" "trigger_lambda" {
-  bucket = aws_s3_bucket.encryption_input_bucket.id
+  bucket = aws_s3_bucket.input_bucket.id
 
   lambda_function {
     lambda_function_arn = aws_lambda_function.split_file_lambda.arn
@@ -117,7 +145,7 @@ resource "aws_lambda_permission" "allow_s3_invoke" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.split_file_lambda.function_name
   principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.encryption_input_bucket.arn
+  source_arn    = aws_s3_bucket.input_bucket.arn
 }
 
 # SQS Queue for encryption parts
@@ -226,7 +254,7 @@ resource "aws_security_group" "ec2_sg" {
 variable "key_name" {
   description = "SSH key pair name"
   type        = string
-  default     = "descentralized_pc"
+  default     = "decentralized_pc"
 }
 
 # AMI Amazon Linux 2 (para us-east-1)
@@ -332,10 +360,16 @@ resource "aws_iam_role" "ec2_encryption_role" {
   })
 }
 
+
+resource "aws_iam_role_policy_attachment" "ec2_encryption_policy_attach" {
+  role       = aws_iam_role.ec2_encryption_role.name
+  policy_arn = aws_iam_policy.ec2_encryption_policy.arn
+}
+
 variable "kms_key_arn" {
   type        = string
   description = "ARN de la clave KMS utilizada para cifrar/descifrar"
-  default     = "arn:aws:kms:us-east-1:225989373192:key/201741c2-5c63-4256-ae56-b6f036809659"
+  default     = "arn:aws:kms:us-east-1:225989373192:key/44573c5c-8f60-43b6-a4ae-663e3990866f"
 }
 
 # Política IAM mejorada para EC2
@@ -393,91 +427,18 @@ resource "aws_iam_policy" "ec2_encryption_policy" {
           "s3:ListBucket"
         ],
         Resource = [
-          aws_s3_bucket.encryption_input_bucket.arn,
-          "${aws_s3_bucket.encryption_input_bucket.arn}/*",
-          aws_s3_bucket.encryption_parts_bucket.arn,
-          "${aws_s3_bucket.encryption_parts_bucket.arn}/*"
+          aws_s3_bucket.input_bucket.arn,
+          "${aws_s3_bucket.input_bucket.arn}/*",
+          aws_s3_bucket.parts_bucket.arn,
+          "${aws_s3_bucket.parts_bucket.arn}/*",
+          aws_s3_bucket.encrypted_output_bucket.arn,
+          "${aws_s3_bucket.encrypted_output_bucket.arn}/*",
+          aws_s3_bucket.encrypted_parts_bucket.arn,
+          "${aws_s3_bucket.encrypted_parts_bucket.arn}/*"
         ]
       }
     ]
   })
-}
-
-resource "aws_iam_role_policy_attachment" "ec2_encryption_policy_attach" {
-  role       = aws_iam_role.ec2_encryption_role.name
-  policy_arn = aws_iam_policy.ec2_encryption_policy.arn
-}
-
-# Script user_data mejorado para EC2
-locals {
-  encryption_user_data = <<-EOF
-    #!/bin/bash
-    # Actualizar el sistema e instalar dependencias
-    yum update -y
-    yum install -y amazon-efs-utils python3 python3-pip git
-
-    # Configurar variables de entorno
-    echo 'export SQS_QUEUE_URL="${aws_sqs_queue.encryption_queue.id}"' >> /etc/profile.d/encryption_env.sh
-    echo 'export INPUT_BUCKET="${aws_s3_bucket.encryption_input_bucket.id}"' >> /etc/profile.d/encryption_env.sh
-    echo 'export PARTS_BUCKET="${aws_s3_bucket.encryption_parts_bucket.id}"' >> /etc/profile.d/encryption_env.sh
-    echo 'export KMS_KEY_ID="${var.kms_key_arn}"' >> /etc/profile.d/encryption_env.sh
-    echo 'export DYNAMO_TABLE="${aws_dynamodb_table.encryption_status.id}"' >> /etc/profile.d/encryption_env.sh
-    echo 'export PYTHONUNBUFFERED=1' >> /etc/profile.d/encryption_env.sh
-    chmod +x /etc/profile.d/encryption_env.sh
-
-    # Instalar dependencias de Python
-    pip3 install boto3
-
-    # Crear directorio para el montaje de EFS
-    mkdir -p /mnt/encryption
-
-    # Esperar a que los mount targets de EFS estén disponibles
-    echo "$(date): Intentando montar EFS..." >> /var/log/efs_mount.log
-    
-    # Intentar montar el EFS con reintentos
-    for i in {1..30}; do
-      if mount -t efs -o tls ${aws_efs_file_system.shared.id}:/ /mnt/encryption; then
-        echo "$(date): EFS montado correctamente" >> /var/log/efs_mount.log
-        break
-      else
-        echo "$(date): Intento $i: EFS aún no disponible, esperando 10 segundos..." >> /var/log/efs_mount.log
-        sleep 10
-      fi
-    done
-
-    # Verificar si el montaje fue exitoso
-    if mountpoint -q /mnt/encryption; then
-      echo "$(date): Verificación: EFS está correctamente montado" >> /var/log/efs_mount.log
-    else
-      echo "$(date): ERROR: No se pudo montar EFS después de varios intentos" >> /var/log/efs_mount.log
-    fi
-
-    # Configurar el montaje automático en fstab (solo si no existe ya)
-    grep -q "${aws_efs_file_system.shared.id}" /etc/fstab || \
-    echo "${aws_efs_file_system.shared.id}:/ /mnt/encryption efs _netdev,tls,iam 0 0" >> /etc/fstab
-
-    # Crear script de verificación de montaje para cron
-    cat > /usr/local/bin/check_efs_mount.sh << 'CHECKSCRIPT'
-    #!/bin/bash
-    if ! mountpoint -q /mnt/encryption; then
-      echo "$(date): EFS no está montado, intentando montar..." >> /var/log/efs_mount.log
-      mount -t efs -o tls ${aws_efs_file_system.shared.id}:/ /mnt/encryption
-      if [ $? -eq 0 ]; then
-        echo "$(date): EFS montado correctamente" >> /var/log/efs_mount.log
-      else
-        echo "$(date): Error al montar EFS" >> /var/log/efs_mount.log
-      fi
-    fi
-    CHECKSCRIPT
-    chmod +x /usr/local/bin/check_efs_mount.sh
-
-    # Configurar verificación periódica con cron
-    echo "*/5 * * * * root /usr/local/bin/check_efs_mount.sh" >> /etc/crontab
-    echo "@reboot root /usr/local/bin/check_efs_mount.sh" >> /etc/crontab
-    
-    # Iniciar el worker con un retraso para asegurar que EFS esté montado
-    echo "@reboot root sleep 60 && /usr/bin/python3 /mnt/encryption/encrypt_worker.py >> /var/log/encrypt_worker.log 2>&1" >> /etc/crontab
-  EOF
 }
 
 # Crear tres instancias EC2
@@ -488,8 +449,18 @@ resource "aws_instance" "ec2_node_1" {
   key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_encryption_profile.name
-  user_data              = local.encryption_user_data
-  depends_on             = [aws_efs_mount_target.efs_mount[0], aws_efs_mount_target.efs_mount[1], aws_efs_mount_target.efs_mount[2]]
+  user_data = templatefile("${path.module}/encryption_user_data.sh", {
+    SQS_QUEUE_URL           = aws_sqs_queue.encryption_queue.id,
+    INPUT_BUCKET            = aws_s3_bucket.input_bucket.id,
+    PARTS_BUCKET            = aws_s3_bucket.parts_bucket.id,
+    ENCRYPTED_PARTS_BUCKET  = aws_s3_bucket.encrypted_parts_bucket.id,
+    ENCRYPTED_OUTPUT_BUCKET = aws_s3_bucket.encrypted_output_bucket.id,
+    KMS_KEY_ID              = var.kms_key_arn,
+    DYNAMO_TABLE            = aws_dynamodb_table.encryption_status.id,
+    EFS_ID                  = aws_efs_file_system.shared.id
+
+  })
+  depends_on = [aws_efs_mount_target.efs_mount[0], aws_efs_mount_target.efs_mount[1], aws_efs_mount_target.efs_mount[2]]
 
   tags = {
     Name = "Encryptor-Node-1"
@@ -497,8 +468,9 @@ resource "aws_instance" "ec2_node_1" {
 
   # Esperar a que la instancia esté disponible antes de continuar
   provisioner "local-exec" {
-    command = "aws ec2 wait instance-status-ok --instance-ids ${self.id} --region ${self.availability_zone}"
+    command = "aws ec2 wait instance-status-ok --instance-ids ${self.id} --region us-east-1"
   }
+
 }
 
 resource "aws_instance" "ec2_node_2" {
@@ -508,16 +480,27 @@ resource "aws_instance" "ec2_node_2" {
   key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_encryption_profile.name
-  user_data              = local.encryption_user_data
-  depends_on             = [aws_efs_mount_target.efs_mount[0], aws_efs_mount_target.efs_mount[1], aws_efs_mount_target.efs_mount[2]]
+  user_data = templatefile("${path.module}/encryption_user_data.sh", {
+    SQS_QUEUE_URL           = aws_sqs_queue.encryption_queue.id,
+    INPUT_BUCKET            = aws_s3_bucket.input_bucket.id,
+    PARTS_BUCKET            = aws_s3_bucket.parts_bucket.id,
+    ENCRYPTED_PARTS_BUCKET  = aws_s3_bucket.encrypted_parts_bucket.id,
+    ENCRYPTED_OUTPUT_BUCKET = aws_s3_bucket.encrypted_output_bucket.id,
+    KMS_KEY_ID              = var.kms_key_arn,
+    DYNAMO_TABLE            = aws_dynamodb_table.encryption_status.id,
+    EFS_ID                  = aws_efs_file_system.shared.id
+
+  })
+  depends_on = [aws_efs_mount_target.efs_mount[0], aws_efs_mount_target.efs_mount[1], aws_efs_mount_target.efs_mount[2]]
 
   tags = {
     Name = "Encryptor-Node-2"
   }
 
   provisioner "local-exec" {
-    command = "aws ec2 wait instance-status-ok --instance-ids ${self.id} --region ${self.availability_zone}"
+    command = "aws ec2 wait instance-status-ok --instance-ids ${self.id} --region us-east-1"
   }
+
 }
 
 resource "aws_instance" "ec2_node_3" {
@@ -527,16 +510,27 @@ resource "aws_instance" "ec2_node_3" {
   key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_encryption_profile.name
-  user_data              = local.encryption_user_data
-  depends_on             = [aws_efs_mount_target.efs_mount[0], aws_efs_mount_target.efs_mount[1], aws_efs_mount_target.efs_mount[2]]
+  user_data = templatefile("${path.module}/encryption_user_data.sh", {
+    SQS_QUEUE_URL           = aws_sqs_queue.encryption_queue.id,
+    INPUT_BUCKET            = aws_s3_bucket.input_bucket.id,
+    PARTS_BUCKET            = aws_s3_bucket.parts_bucket.id,
+    ENCRYPTED_PARTS_BUCKET  = aws_s3_bucket.encrypted_parts_bucket.id,
+    ENCRYPTED_OUTPUT_BUCKET = aws_s3_bucket.encrypted_output_bucket.id,
+    KMS_KEY_ID              = var.kms_key_arn,
+    DYNAMO_TABLE            = aws_dynamodb_table.encryption_status.id,
+    EFS_ID                  = aws_efs_file_system.shared.id
+
+  })
+  depends_on = [aws_efs_mount_target.efs_mount[0], aws_efs_mount_target.efs_mount[1], aws_efs_mount_target.efs_mount[2]]
 
   tags = {
     Name = "Encryptor-Node-3"
   }
 
   provisioner "local-exec" {
-    command = "aws ec2 wait instance-status-ok --instance-ids ${self.id} --region ${self.availability_zone}"
+    command = "aws ec2 wait instance-status-ok --instance-ids ${self.id} --region us-east-1"
   }
+
 }
 
 resource "aws_iam_instance_profile" "ec2_encryption_profile" {
@@ -565,11 +559,21 @@ output "sqs_queue_url" {
 }
 
 output "s3_input_bucket" {
-  value       = aws_s3_bucket.encryption_input_bucket.bucket
+  value       = aws_s3_bucket.input_bucket.bucket
   description = "Name of the S3 input bucket"
 }
 
 output "s3_parts_bucket" {
-  value       = aws_s3_bucket.encryption_parts_bucket.bucket
+  value       = aws_s3_bucket.parts_bucket.bucket
   description = "Name of the S3 parts bucket"
 }
+
+output "s3_encrypted_output_bucket" {
+  value       = aws_s3_bucket.encrypted_output_bucket.bucket
+  description = "Name of the S3 encrypted output bucket"
+}
+output "s3_encrypted_parts_bucket" {
+  value       = aws_s3_bucket.encrypted_parts_bucket.bucket
+  description = "Name of the S3 encrypted parts bucket"
+}
+

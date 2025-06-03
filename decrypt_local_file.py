@@ -11,6 +11,7 @@ DELIMITER = b"\x00\xffDELIM\xff\x00"  # Delimitador especial
 # Inicializar cliente KMS
 kms = boto3.client("kms", region_name=REGION)
 
+
 def decrypt_local_file(encrypted_filename):
     encrypted_file_path = os.path.join(EFS_MOUNT_PATH, encrypted_filename)
 
@@ -36,7 +37,7 @@ def decrypt_local_file(encrypted_filename):
 
     # Obtener nombre del archivo original eliminando ".final.enc"
     if encrypted_filename.endswith(".final.enc"):
-        output_filename = encrypted_filename[:-len(".final.enc")]
+        output_filename = encrypted_filename[: -len(".final.enc")]
     else:
         output_filename = encrypted_filename + ".decrypted"  # Fallback
 
@@ -45,6 +46,7 @@ def decrypt_local_file(encrypted_filename):
         f.write(decrypted_data)
 
     print(f"[INFO] Archivo desencriptado guardado como: {output_filename}")
+
 
 if __name__ == "__main__":
     encrypted_filename = input("Ingresa el nombre del archivo cifrado (.final.enc): ")

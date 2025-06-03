@@ -20,6 +20,7 @@ s3 = boto3.client("s3", region_name=REGION)
 kms = boto3.client("kms", region_name=REGION)
 dynamodb = boto3.client("dynamodb", region_name=REGION)
 
+
 def process_messages():
     while True:
         response = sqs.receive_message(QueueUrl=QUEUE_URL, MaxNumberOfMessages=1, WaitTimeSeconds=10)
@@ -67,6 +68,7 @@ def process_messages():
             # Intentar unificar si corresponde
             try_unify(file_name)
 
+
 def try_unify(file_name):
     response = dynamodb.query(
         TableName=DYNAMO_TABLE,
@@ -87,8 +89,9 @@ def try_unify(file_name):
             )
             unify_parts(file_name)
         except ClientError as e:
-            if e.response['Error']['Code'] != 'ConditionalCheckFailedException':
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
                 raise
+
 
 def unify_parts(file_name):
     unified_path = f"{EFS_MOUNT_PATH}/{file_name}.final.enc"
@@ -108,6 +111,6 @@ def unify_parts(file_name):
     s3.upload_file(unified_path, ENCRYPTED_OUTPUT_BUCKET, f"{file_name}.final.enc")
     print(f"[UNIFIED] {file_name}.final.enc subido a {ENCRYPTED_OUTPUT_BUCKET}")
 
+
 if __name__ == "__main__":
     process_messages()
-EOF
